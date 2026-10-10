@@ -22,3 +22,8 @@ venv/
 
 # Generated test data
 test-data/synthetic_sos.json
+
+# Kotlin and nested Gradle caches
+.kotlin/
+**/.gradle/
+
