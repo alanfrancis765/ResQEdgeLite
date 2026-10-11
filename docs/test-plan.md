@@ -29,7 +29,7 @@
 
 ## Performance measurements
 
-- Packet size in bytes: 32 bytes
+- Packet size: 32 bytes
 - Delivery latency per hop
 - Peer connection range
 - Battery consumption

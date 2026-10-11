@@ -1,10 +1,8 @@
 # Demo Phone Inventory
 
-## Phone 1
-- Model: Realme RMX3312
-- Android version: 15
-- RAM: 8 GB
-- Google Play services: Available
+| Model | Android | RAM | Play Services |
+|---|---|---|---|
+| realme RMX3312 | Android 15 | 8 GB | Yes |
 
 ## Demo Readiness
 - Available phones: 1

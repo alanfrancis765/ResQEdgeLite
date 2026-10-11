@@ -26,6 +26,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.resqedge.lite.ui.capture.CitizenScreen
 import com.resqedge.lite.ui.responder.ResponderScreen
 import com.resqedge.lite.ui.theme.ResQEdgeLiteTheme
 
@@ -48,9 +49,7 @@ class MainActivity : ComponentActivity() {
                                 onCitizen = { screen = Screen.CITIZEN },
                                 onResponder = { screen = Screen.RESPONDER }
                             )
-                            Screen.CITIZEN -> PlaceholderScreen(
-                                title = "Citizen mode",
-                                note = "SOS form goes here (next stage).",
+                            Screen.CITIZEN -> CitizenScreen(
                                 onBack = { screen = Screen.HOME }
                             )
                             Screen.RESPONDER -> ResponderScreen(
