@@ -39,4 +39,9 @@ class PacketBuilderTest {
         val p = PacketBuilder.build(0, 0, 0, 10f, 76f, 0, 1)
         assertEquals(1, p.headcount)
     }
+
+    @Test fun accuracyIsClampedToOneByte() {
+        val p = PacketBuilder.build(1, 0, 0, 10f, 76f, 500, 1)
+        assertEquals(255, p.accuracyM)
+    }
 }

@@ -1,5 +1,7 @@
 package com.resqedge.lite.ui.capture
 
+import android.content.Intent
+import android.provider.Settings
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
@@ -8,12 +10,14 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.resqedge.lite.model.PacketBuilder
 import com.resqedge.lite.model.SosPacket
+import java.util.Locale
 import kotlin.random.Random
 
 private val medicalOptions = listOf(
@@ -27,9 +31,9 @@ private val waterOptions = listOf(
     "Ankle deep", "Knee deep", "Waist deep", "Chest deep", "Up to the roof"
 )
 
-// Placeholder until GPS is added in the next step.
-private const val PLACEHOLDER_LAT = 10.0159f
-private const val PLACEHOLDER_LON = 76.3419f
+// Used only when "Use test location" is ticked.
+private const val TEST_LAT = 10.0159f
+private const val TEST_LON = 76.3419f
 
 @Composable
 fun CitizenScreen(onBack: () -> Unit) {
@@ -37,7 +41,12 @@ fun CitizenScreen(onBack: () -> Unit) {
     var flags by remember { mutableStateOf(0) }
     var water by remember { mutableStateOf(2) }
     var packet by remember { mutableStateOf<SosPacket?>(null) }
-    val senderId = remember { Random.nextInt(0, Int.MAX_VALUE) } // persisted per install later
+    var locationNote by remember { mutableStateOf("") }
+    var useTest by remember { mutableStateOf(false) }
+    val senderId = remember { Random.nextInt(0, Int.MAX_VALUE) } // persist per install later
+    val gps = rememberGps()
+
+    val canPrepare = gps.status == GpsStatus.FIX || useTest
 
     Column(
         modifier = Modifier
@@ -89,27 +98,36 @@ fun CitizenScreen(onBack: () -> Unit) {
             }
         }
 
-        Spacer(Modifier.height(8.dp))
-        Text(
-            "Location: placeholder for now (GPS is the next step)",
-            style = MaterialTheme.typography.bodySmall
-        )
+        Spacer(Modifier.height(16.dp))
+        GpsCard(gps = gps, useTest = useTest, onUseTest = { useTest = it })
 
         Spacer(Modifier.height(16.dp))
         Button(
+            enabled = canPrepare,
             onClick = {
+                val live = gps.status == GpsStatus.FIX && !useTest
                 packet = PacketBuilder.build(
                     headcount = headcount,
                     medicalFlags = flags,
                     waterLevel = water,
-                    lat = PLACEHOLDER_LAT,
-                    lon = PLACEHOLDER_LON,
-                    accuracyM = 0,
+                    lat = if (live) gps.lat.toFloat() else TEST_LAT,
+                    lon = if (live) gps.lon.toFloat() else TEST_LON,
+                    accuracyM = if (live) Math.round(gps.accuracyM) else 0,
                     senderId = senderId
                 )
+                locationNote = if (live)
+                    "Live GPS, accuracy about ${Math.round(gps.accuracyM)} m"
+                else
+                    "TEST location (not real)"
             },
             modifier = Modifier.fillMaxWidth()
         ) { Text("Prepare SOS packet") }
+        if (!canPrepare) {
+            Text(
+                "Waiting for a location. Tick the test option to continue indoors.",
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
 
         packet?.let { p ->
             val bytes = p.toBytes()
@@ -121,6 +139,10 @@ fun CitizenScreen(onBack: () -> Unit) {
                         style = MaterialTheme.typography.titleMedium
                     )
                     Text("Urgency ${p.urgency}  |  ttl ${p.ttl}  |  hop ${p.hopCount}")
+                    Text(
+                        "Location: $locationNote",
+                        style = MaterialTheme.typography.bodySmall
+                    )
                     Spacer(Modifier.height(8.dp))
                     Text(
                         bytes.joinToString(" ") { "%02X".format(it) },
@@ -133,6 +155,44 @@ fun CitizenScreen(onBack: () -> Unit) {
                         style = MaterialTheme.typography.bodySmall
                     )
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun GpsCard(gps: GpsState, useTest: Boolean, onUseTest: (Boolean) -> Unit) {
+    val context = LocalContext.current
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Text("Location", style = MaterialTheme.typography.titleMedium)
+            when (gps.status) {
+                GpsStatus.NO_PERMISSION -> {
+                    Text("Precise location permission is needed to attach your position.")
+                    Spacer(Modifier.height(8.dp))
+                    Button(onClick = gps.requestPermission) { Text("Allow location") }
+                }
+                GpsStatus.GPS_OFF -> {
+                    Text("Location is switched off on this phone.")
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedButton(onClick = {
+                        context.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+                    }) { Text("Open location settings") }
+                }
+                GpsStatus.SEARCHING ->
+                    Text("Searching for a GPS signal. Go near a window or outside; this can take a minute.")
+                GpsStatus.FIX ->
+                    Text(
+                        String.format(
+                            Locale.US,
+                            "%.5f, %.5f  (accuracy %d m, updated %d s ago)",
+                            gps.lat, gps.lon, Math.round(gps.accuracyM), gps.ageSeconds
+                        )
+                    )
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(checked = useTest, onCheckedChange = onUseTest)
+                Text("Use test location (for indoor testing)")
             }
         }
     }
