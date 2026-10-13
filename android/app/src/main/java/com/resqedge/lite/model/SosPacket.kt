@@ -20,7 +20,7 @@ data class SosPacket(
     fun isValid() =
         lat in -90f..90f && lon in -180f..180f &&
         accuracyM in 0..255 && headcount in 0..255 &&
-        medicalFlags in 0..255 && waterLevel in 0..4 &&
+        medicalFlags in 0..255 && waterLevel in 0..5 &&
         urgency in 1..5 && ttl in 0..7 && hopCount in 0..255
 
     fun toBytes(): ByteArray {

@@ -6,6 +6,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.resqedge.lite.data.DemoData
 import com.resqedge.lite.data.IngestResult
 import com.resqedge.lite.data.ServiceLocator
 import com.resqedge.lite.model.PacketBuilder
@@ -77,6 +78,18 @@ fun IngestDebugPanel() {
                 ) {
                     Text("Bad bytes", maxLines = 1, softWrap = false, style = MaterialTheme.typography.labelMedium)
                 }
+            }
+            Spacer(Modifier.height(4.dp))
+            OutlinedButton(
+                modifier = Modifier.fillMaxWidth(),
+                onClick = {
+                    scope.launch {
+                        val res = DemoData.load(context, ingestor)
+                        msg = "${res.stored} stored, ${res.duplicates} duplicates, ${res.skipped} skipped"
+                    }
+                }
+            ) {
+                Text("Load 200 simulated packets")
             }
             Spacer(Modifier.height(4.dp))
             TextButton(onClick = { scope.launch { store.clear(); msg = "Cleared" } }) {

@@ -1,88 +1,65 @@
 package com.resqedge.lite.ui.responder
 
-import android.content.Context
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Card
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import com.resqedge.lite.model.SimulatedReport
+import com.resqedge.lite.data.ServiceLocator
+import com.resqedge.lite.data.StoredPacket
+import com.resqedge.lite.model.SosPacket
+import com.resqedge.lite.model.Triage
+import kotlinx.coroutines.delay
+import java.util.Locale
 
-private val WATER = listOf("ankle", "knee", "waist", "chest", "roof")
+private val WATER = listOf("ankle", "knee", "waist", "chest", "roof", "submerged")
+
+private data class Ranked(val sp: StoredPacket, val waitMin: Long, val score: Double)
 
 private fun medicalText(flags: Int): String {
     val names = buildList {
-        if ((flags and 1) != 0) add("injured")
-        if ((flags and 2) != 0) add("elderly")
-        if ((flags and 4) != 0) add("infant")
-        if ((flags and 8) != 0) add("medication")
-        if ((flags and 16) != 0) add("pregnant")
+        if ((flags and SosPacket.FLAG_INJURED) != 0) add("injured")
+        if ((flags and SosPacket.FLAG_ELDERLY) != 0) add("elderly")
+        if ((flags and SosPacket.FLAG_INFANT) != 0) add("infant")
+        if ((flags and SosPacket.FLAG_MEDICATION) != 0) add("medication")
+        if ((flags and SosPacket.FLAG_PREGNANT) != 0) add("pregnant")
     }
     return if (names.isEmpty()) "no medical flags" else names.joinToString(", ")
 }
 
-private fun agoText(timestamp: Long, nowSec: Long): String {
-    val m = ((nowSec - timestamp) / 60).toInt().coerceAtLeast(0)
-    return if (m >= 60) "${m / 60} h ${m % 60} min ago" else "$m min ago"
-}
+private fun waitText(min: Long) =
+    if (min >= 60) "${min / 60} h ${min % 60} min" else "$min min"
 
-private fun fallbackReports(): List<SimulatedReport> {
-    val now = System.currentTimeMillis() / 1000
-    return listOf(
-        SimulatedReport(1, 9.40, 76.40, 10, 6, 3, 3, 4, now - 1200, 1, "Kuttanad"),
-        SimulatedReport(2, 9.32, 76.61, 15, 2, 4, 2, 3, now - 2400, 0, "Chengannur"),
-        SimulatedReport(3, 10.11, 76.35, 8, 9, 1, 4, 5, now - 600, 2, "Aluva"),
-        SimulatedReport(4, 10.31, 76.33, 20, 4, 0, 1, 1, now - 5400, 3, "Chalakudy"),
-        SimulatedReport(5, 9.38, 76.78, 12, 3, 8, 3, 3, now - 900, 1, "Ranni")
-    )
-}
-
-private fun loadReports(context: Context): Pair<List<SimulatedReport>, Boolean> {
-    return try {
-        val lines = context.assets.open("synthetic_sos_200.csv")
-            .bufferedReader().readLines().drop(1)
-        val parsed = lines.mapNotNull { SimulatedReport.fromCsvLine(it) }
-        if (parsed.isEmpty()) Pair(fallbackReports(), true) else Pair(parsed, false)
-    } catch (e: Exception) {
-        Pair(fallbackReports(), true)
-    }
-}
+private fun hopText(h: Int) = if (h == 1) "1 hop" else "$h hops"
 
 @Composable
 fun ResponderScreen(onBack: () -> Unit) {
     val context = LocalContext.current
-    val nowSec = remember { System.currentTimeMillis() / 1000 }
-    val loaded = remember { loadReports(context) }
-    val usingFallback = loaded.second
-    // Simple sort for the skeleton. Real scoring comes in the scoring item.
-    val reports = remember {
-        loaded.first.sortedWith(
-            compareByDescending<SimulatedReport> { it.urgency }
-                .thenByDescending { it.headcount }
+    val store = remember { ServiceLocator.store(context) }
+    val stored by store.observeAll().collectAsState(initial = emptyList())
+
+    var nowMs by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(30_000)
+            nowMs = System.currentTimeMillis()   // waiting times and ranking keep updating
+        }
+    }
+
+    val ranked = remember(stored, nowMs) {
+        stored.map { sp ->
+            val wait = Triage.waitMinutes(sp.packet.timestamp.toLong(), sp.receivedAtMs, nowMs)
+            Ranked(sp, wait, Triage.score(sp.packet, wait))
+        }.sortedWith(
+            compareByDescending<Ranked> { it.score }.thenBy { it.sp.packet.packetId }
         )
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp)
-    ) {
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedButton(onClick = onBack) { Text("Back") }
             Spacer(Modifier.width(12.dp))
@@ -90,29 +67,39 @@ fun ResponderScreen(onBack: () -> Unit) {
         }
         Spacer(Modifier.height(8.dp))
         Text(
-            if (usingFallback) "SIMULATED DATA (built-in sample, CSV not found)"
-            else "SIMULATED DATA (200-record test set)",
+            "${ranked.size} reports, ${ranked.sumOf { it.sp.packet.headcount }} people",
+            style = MaterialTheme.typography.bodyMedium
+        )
+        Text(
+            "Ranked by a rule-based score. Packets loaded from the debug panel are simulated.",
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.error
         )
-        Text(
-            "${reports.size} reports, ${reports.sumOf { it.headcount }} people",
-            style = MaterialTheme.typography.bodyMedium
-        )
         Spacer(Modifier.height(8.dp))
+        IngestDebugPanel()
+        Spacer(Modifier.height(8.dp))
+        if (ranked.isEmpty()) Text("No packets yet. Use the debug panel to add some.")
 
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(reports, key = { it.packetId }) { r ->
+        LazyColumn(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            itemsIndexed(ranked, key = { _, r -> r.sp.packet.packetId }) { index, r ->
+                val p = r.sp.packet
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(12.dp)) {
                         Text(
-                            "Urgency ${r.urgency}  |  ${r.area}",
+                            "#${index + 1}   score ${r.score.toInt()}",
                             style = MaterialTheme.typography.titleMedium
                         )
-                        Text("${r.headcount} people  |  water: ${WATER.getOrElse(r.waterLevel) { "?" }}")
-                        Text(medicalText(r.medicalFlags))
+                        Text("${p.headcount} people  |  water: ${WATER.getOrElse(p.waterLevel) { "?" }}")
+                        Text(medicalText(p.medicalFlags))
                         Text(
-                            "${r.hopCount} hops  |  accuracy ${r.accuracyM} m  |  ${agoText(r.timestamp, nowSec)}",
+                            String.format(Locale.US, "%.4f, %.4f", p.lat, p.lon),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        Text(
+                            "${hopText(p.hopCount)}  |  accuracy ${p.accuracyM} m  |  waiting ${waitText(r.waitMin)}  |  sender hint ${p.urgency}",
                             style = MaterialTheme.typography.bodySmall
                         )
                     }

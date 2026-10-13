@@ -15,6 +15,9 @@ interface PacketDao {
     @Query("SELECT COUNT(*) FROM packets")
     fun observeCount(): Flow<Int>
 
+    @Query("SELECT * FROM packets")
+    fun observeAll(): Flow<List<PacketEntity>>
+
     @Query("SELECT * FROM packets WHERE ttl > 0")
     suspend fun forwardable(): List<PacketEntity>
 

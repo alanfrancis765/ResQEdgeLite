@@ -3,6 +3,7 @@ package com.resqedge.lite.data
 import com.resqedge.lite.model.SosPacket
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -18,6 +19,8 @@ private class FakeStore : PacketStore {
         return true
     }
     override fun observeCount(): Flow<Int> = count
+    override fun observeAll(): Flow<List<StoredPacket>> =
+        flowOf(rows.values.map { StoredPacket(it.first, it.second) })
     override suspend fun forwardable() = rows.values.map { it.first }.filter { it.ttl > 0 }
     override suspend fun deleteOlderThan(cutoffMs: Long): Int {
         val old = rows.filterValues { it.second < cutoffMs }.keys
