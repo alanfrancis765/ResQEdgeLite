@@ -42,12 +42,6 @@ private fun agoText(timestamp: Long, nowSec: Long): String {
     return if (m >= 60) "${m / 60} h ${m % 60} min ago" else "$m min ago"
 }
 
-private fun rebaseToNow(list: List<SimulatedReport>, nowSec: Long): List<SimulatedReport> {
-    if (list.isEmpty()) return list
-    val shift = (nowSec - 300) - list.maxOf { it.timestamp }
-    return list.map { it.copy(timestamp = it.timestamp + shift) }
-}
-
 private fun fallbackReports(): List<SimulatedReport> {
     val now = System.currentTimeMillis() / 1000
     return listOf(
@@ -64,8 +58,7 @@ private fun loadReports(context: Context): Pair<List<SimulatedReport>, Boolean> 
         val lines = context.assets.open("synthetic_sos_200.csv")
             .bufferedReader().readLines().drop(1)
         val parsed = lines.mapNotNull { SimulatedReport.fromCsvLine(it) }
-        if (parsed.isEmpty()) Pair(fallbackReports(), true)
-        else Pair(rebaseToNow(parsed, System.currentTimeMillis() / 1000), false)
+        if (parsed.isEmpty()) Pair(fallbackReports(), true) else Pair(parsed, false)
     } catch (e: Exception) {
         Pair(fallbackReports(), true)
     }
@@ -106,8 +99,6 @@ fun ResponderScreen(onBack: () -> Unit) {
             "${reports.size} reports, ${reports.sumOf { it.headcount }} people",
             style = MaterialTheme.typography.bodyMedium
         )
-        Spacer(Modifier.height(8.dp))
-        IngestDebugPanel()
         Spacer(Modifier.height(8.dp))
 
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {

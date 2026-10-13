@@ -15,11 +15,8 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.resqedge.lite.data.IngestResult
-import com.resqedge.lite.data.ServiceLocator
 import com.resqedge.lite.model.PacketBuilder
 import com.resqedge.lite.model.SosPacket
-import kotlinx.coroutines.launch
 import java.util.Locale
 import kotlin.random.Random
 
@@ -48,11 +45,6 @@ fun CitizenScreen(onBack: () -> Unit) {
     var useTest by remember { mutableStateOf(false) }
     val senderId = remember { Random.nextInt(0, Int.MAX_VALUE) } // persist per install later
     val gps = rememberGps()
-
-    val appContext = LocalContext.current
-    val ingestor = remember { ServiceLocator.ingestor(appContext) }
-    val scope = rememberCoroutineScope()
-    var saveMsg by remember { mutableStateOf("") }
 
     val canPrepare = gps.status == GpsStatus.FIX || useTest
 
@@ -127,7 +119,6 @@ fun CitizenScreen(onBack: () -> Unit) {
                     "Live GPS, accuracy about ${Math.round(gps.accuracyM)} m"
                 else
                     "TEST location (not real)"
-                saveMsg = ""
             },
             modifier = Modifier.fillMaxWidth()
         ) { Text("Prepare SOS packet") }
@@ -159,18 +150,10 @@ fun CitizenScreen(onBack: () -> Unit) {
                         fontSize = 12.sp
                     )
                     Spacer(Modifier.height(8.dp))
-                    Button(onClick = {
-                        scope.launch {
-                            saveMsg = when (ingestor.ingest(bytes)) {
-                                is IngestResult.Stored -> "Saved on this phone. Mesh sending comes later."
-                                IngestResult.Duplicate -> "Already saved."
-                                IngestResult.Malformed -> "Error: packet rejected."
-                            }
-                        }
-                    }) { Text("Save on this phone") }
-                    if (saveMsg.isNotEmpty()) {
-                        Text(saveMsg, style = MaterialTheme.typography.bodySmall)
-                    }
+                    Text(
+                        "Not sent yet. Storage and mesh sending come in later steps.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
                 }
             }
         }

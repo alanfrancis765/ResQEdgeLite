@@ -33,10 +33,7 @@ data class SimulatedReport(
                     timestamp = c[9].trim().toLong(),
                     hopCount = c[11].trim().toInt(),
                     area = if (c.size >= 13) c[12].trim() else "Zone A"
-                ).takeIf {
-                    it.waterLevel in 0..4 && it.urgency in 1..5 && it.headcount in 1..255 &&
-                    it.lat in -90.0..90.0 && it.lon in -180.0..180.0
-                }
+                )
             } catch (e: NumberFormatException) {
                 null
             }
