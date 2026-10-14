@@ -49,9 +49,6 @@ dependencies {
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)
-    implementation("org.mapsforge:mapsforge-map-android:0.25.0")
-    implementation("org.mapsforge:mapsforge-map-reader:0.25.0")
-    implementation("org.mapsforge:mapsforge-themes:0.25.0")
 
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))

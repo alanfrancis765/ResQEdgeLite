@@ -133,27 +133,7 @@ fun ResponderScreen(onBack: () -> Unit) {
                 }
             }
             1 -> ClusterList(clusters, Modifier.weight(1f))
-            2 -> {
-                var mapType by remember { mutableStateOf("Street") }
-                Column(modifier = Modifier.weight(1f)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        if (mapType == "Street") Button(onClick = { mapType = "Street" }, modifier = Modifier.weight(1f)) { Text("Street") }
-                        else OutlinedButton(onClick = { mapType = "Street" }, modifier = Modifier.weight(1f)) { Text("Street") }
-
-                        if (mapType == "Plain") Button(onClick = { mapType = "Plain" }, modifier = Modifier.weight(1f)) { Text("Plain") }
-                        else OutlinedButton(onClick = { mapType = "Plain" }, modifier = Modifier.weight(1f)) { Text("Plain") }
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    if (mapType == "Street") {
-                        StreetClusterMap(clusters, Modifier.weight(1f))
-                    } else {
-                        ClusterMap(clusters, Modifier.weight(1f))
-                    }
-                }
-            }
+            2 -> ClusterMap(clusters, Modifier.weight(1f))
         }
     }
 }
