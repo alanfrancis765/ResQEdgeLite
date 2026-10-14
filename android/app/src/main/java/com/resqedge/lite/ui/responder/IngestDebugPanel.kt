@@ -84,7 +84,7 @@ fun IngestDebugPanel() {
                 modifier = Modifier.fillMaxWidth(),
                 onClick = {
                     scope.launch {
-                        val res = DemoData.load(context, ingestor)
+                        val res = DemoData.load(ingestor)
                         msg = "${res.stored} stored, ${res.duplicates} duplicates, ${res.skipped} skipped"
                     }
                 }
