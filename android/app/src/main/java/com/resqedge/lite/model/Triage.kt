@@ -9,7 +9,7 @@ data class TriageWeights(
     val maxPeopleCounted: Int = 20,
     val perWaterLevel: Double = 10.0,
     val perMinuteWaiting: Double = 0.5,
-    val maxWaitMinutes: Long = 180
+    val maxWaitMinutes: Long = 60
 )
 
 object Triage {

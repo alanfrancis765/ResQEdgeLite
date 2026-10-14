@@ -11,6 +11,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.resqedge.lite.data.ServiceLocator
 import com.resqedge.lite.data.StoredPacket
+import com.resqedge.lite.model.Clustering
+import com.resqedge.lite.model.ScoredReport
 import com.resqedge.lite.model.SosPacket
 import com.resqedge.lite.model.Triage
 import kotlinx.coroutines.delay
@@ -43,6 +45,7 @@ fun ResponderScreen(onBack: () -> Unit) {
     val stored by store.observeAll().collectAsState(initial = emptyList())
 
     var nowMs by remember { mutableStateOf(System.currentTimeMillis()) }
+    var view by remember { mutableStateOf(0) }   // 0 Reports, 1 Clusters, 2 Map
     LaunchedEffect(Unit) {
         while (true) {
             delay(30_000)
@@ -59,6 +62,10 @@ fun ResponderScreen(onBack: () -> Unit) {
         )
     }
 
+    val clusters = remember(ranked) {
+        Clustering.cluster(ranked.map { ScoredReport(it.sp.packet, it.score) })
+    }
+
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedButton(onClick = onBack) { Text("Back") }
@@ -67,7 +74,7 @@ fun ResponderScreen(onBack: () -> Unit) {
         }
         Spacer(Modifier.height(8.dp))
         Text(
-            "${ranked.size} reports, ${ranked.sumOf { it.sp.packet.headcount }} people",
+            "${ranked.size} reports, ${ranked.sumOf { it.sp.packet.headcount }} people, ${clusters.size} clusters",
             style = MaterialTheme.typography.bodyMedium
         )
         Text(
@@ -76,32 +83,74 @@ fun ResponderScreen(onBack: () -> Unit) {
             color = MaterialTheme.colorScheme.error
         )
         Spacer(Modifier.height(8.dp))
-        IngestDebugPanel()
-        Spacer(Modifier.height(8.dp))
-        if (ranked.isEmpty()) Text("No packets yet. Use the debug panel to add some.")
-
-        LazyColumn(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            itemsIndexed(ranked, key = { _, r -> r.sp.packet.packetId }) { index, r ->
-                val p = r.sp.packet
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Text(
-                            "#${index + 1}   score ${r.score.toInt()}",
-                            style = MaterialTheme.typography.titleMedium
-                        )
-                        Text("${p.headcount} people  |  water: ${WATER.getOrElse(p.waterLevel) { "?" }}")
-                        Text(medicalText(p.medicalFlags))
-                        Text(
-                            String.format(Locale.US, "%.4f, %.4f", p.lat, p.lon),
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                        Text(
-                            "${hopText(p.hopCount)}  |  accuracy ${p.accuracyM} m  |  waiting ${waitText(r.waitMin)}  |  sender hint ${p.urgency}",
-                            style = MaterialTheme.typography.bodySmall
-                        )
+            if (view == 0) Button(onClick = { view = 0 }, modifier = Modifier.weight(1f)) { Text("Reports") }
+            else OutlinedButton(onClick = { view = 0 }, modifier = Modifier.weight(1f)) { Text("Reports") }
+
+            if (view == 1) Button(onClick = { view = 1 }, modifier = Modifier.weight(1f)) { Text("Clusters") }
+            else OutlinedButton(onClick = { view = 1 }, modifier = Modifier.weight(1f)) { Text("Clusters") }
+
+            if (view == 2) Button(onClick = { view = 2 }, modifier = Modifier.weight(1f)) { Text("Map") }
+            else OutlinedButton(onClick = { view = 2 }, modifier = Modifier.weight(1f)) { Text("Map") }
+        }
+        Spacer(Modifier.height(8.dp))
+        if (view == 0) {
+            IngestDebugPanel()
+            Spacer(Modifier.height(8.dp))
+        }
+        if (ranked.isEmpty() && view == 0) Text("No packets yet. Use the debug panel to add some.")
+
+        when (view) {
+            0 -> {
+                LazyColumn(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    itemsIndexed(ranked, key = { _, r -> r.sp.packet.packetId }) { index, r ->
+                        val p = r.sp.packet
+                        Card(modifier = Modifier.fillMaxWidth()) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Text(
+                                    "#${index + 1}   score ${r.score.toInt()}",
+                                    style = MaterialTheme.typography.titleMedium
+                                )
+                                Text("${p.headcount} people  |  water: ${WATER.getOrElse(p.waterLevel) { "?" }}")
+                                Text(medicalText(p.medicalFlags))
+                                Text(
+                                    String.format(Locale.US, "%.4f, %.4f", p.lat, p.lon),
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                                Text(
+                                    "${hopText(p.hopCount)}  |  accuracy ${p.accuracyM} m  |  waiting ${waitText(r.waitMin)}  |  sender hint ${p.urgency}",
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            1 -> ClusterList(clusters, Modifier.weight(1f))
+            2 -> {
+                var mapType by remember { mutableStateOf("Street") }
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        if (mapType == "Street") Button(onClick = { mapType = "Street" }, modifier = Modifier.weight(1f)) { Text("Street") }
+                        else OutlinedButton(onClick = { mapType = "Street" }, modifier = Modifier.weight(1f)) { Text("Street") }
+
+                        if (mapType == "Plain") Button(onClick = { mapType = "Plain" }, modifier = Modifier.weight(1f)) { Text("Plain") }
+                        else OutlinedButton(onClick = { mapType = "Plain" }, modifier = Modifier.weight(1f)) { Text("Plain") }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    if (mapType == "Street") {
+                        StreetClusterMap(clusters, Modifier.weight(1f))
+                    } else {
+                        ClusterMap(clusters, Modifier.weight(1f))
                     }
                 }
             }

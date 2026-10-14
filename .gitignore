@@ -27,3 +27,8 @@ test-data/synthetic_sos.json
 .kotlin/
 **/.gradle/
 
+# Map and archive files
+*.map
+*.pbf
+*.zip
+

@@ -10,6 +10,7 @@ kotlin = "2.0.21"
 composeBom = "2026.02.01"
 room = "2.8.5"
 ksp = "2.0.21-1.0.28"
+mapsforge = "0.25.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -29,6 +30,9 @@ androidx-compose-material3 = { group = "androidx.compose.material3", name = "mat
 androidx-room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }
 androidx-room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = "room" }
 androidx-room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "room" }
+mapsforge-map-android = { group = "org.mapsforge", name = "mapsforge-map-android", version.ref = "mapsforge" }
+mapsforge-map-reader = { group = "org.mapsforge", name = "mapsforge-map-reader", version.ref = "mapsforge" }
+mapsforge-themes = { group = "org.mapsforge", name = "mapsforge-themes", version.ref = "mapsforge" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
