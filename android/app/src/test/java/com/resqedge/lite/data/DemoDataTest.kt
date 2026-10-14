@@ -21,7 +21,7 @@ class DemoDataTest {
 
     @Test fun skipsWaterLevelOutOfRange() {
         val out = DemoData.parseCsv(listOf(
-            header, "100,1,9.5,76.4,10,3,1,6,3,1700000000,7,0,Zone A"
+            header, "100,1,9.5,76.4,10,3,1,5,3,1700000000,7,0,Zone A"
         ), now)
         assertEquals(0, out.size)
     }

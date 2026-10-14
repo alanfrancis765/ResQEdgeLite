@@ -16,7 +16,7 @@ import com.resqedge.lite.model.Triage
 import kotlinx.coroutines.delay
 import java.util.Locale
 
-private val WATER = listOf("ankle", "knee", "waist", "chest", "roof", "submerged")
+private val WATER = listOf("ankle", "knee", "waist", "chest", "roof")
 
 private data class Ranked(val sp: StoredPacket, val waitMin: Long, val score: Double)
 
