@@ -133,7 +133,27 @@ fun ResponderScreen(onBack: () -> Unit) {
                 }
             }
             1 -> ClusterList(clusters, Modifier.weight(1f))
-            2 -> ClusterMap(clusters, Modifier.weight(1f))
+            2 -> {
+                var mapType by remember { mutableStateOf("Lite") }
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        if (mapType == "Lite") Button(onClick = { mapType = "Lite" }, modifier = Modifier.weight(1f)) { Text("Lite") }
+                        else OutlinedButton(onClick = { mapType = "Lite" }, modifier = Modifier.weight(1f)) { Text("Lite") }
+
+                        if (mapType == "Plain") Button(onClick = { mapType = "Plain" }, modifier = Modifier.weight(1f)) { Text("Plain") }
+                        else OutlinedButton(onClick = { mapType = "Plain" }, modifier = Modifier.weight(1f)) { Text("Plain") }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    if (mapType == "Lite") {
+                        LiteClusterMap(clusters, Modifier.weight(1f))
+                    } else {
+                        ClusterMap(clusters, Modifier.weight(1f))
+                    }
+                }
+            }
         }
     }
 }
