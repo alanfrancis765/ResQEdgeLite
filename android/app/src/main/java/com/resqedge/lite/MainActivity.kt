@@ -27,10 +27,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.resqedge.lite.ui.capture.CitizenScreen
+import com.resqedge.lite.ui.mesh.MeshScreen
 import com.resqedge.lite.ui.responder.ResponderScreen
 import com.resqedge.lite.ui.theme.ResQEdgeLiteTheme
 
-enum class Screen { HOME, CITIZEN, RESPONDER }
+enum class Screen { HOME, CITIZEN, RESPONDER, MESH }
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -47,12 +48,16 @@ class MainActivity : ComponentActivity() {
                         when (screen) {
                             Screen.HOME -> HomeScreen(
                                 onCitizen = { screen = Screen.CITIZEN },
-                                onResponder = { screen = Screen.RESPONDER }
+                                onResponder = { screen = Screen.RESPONDER },
+                                onMesh = { screen = Screen.MESH }
                             )
                             Screen.CITIZEN -> CitizenScreen(
                                 onBack = { screen = Screen.HOME }
                             )
                             Screen.RESPONDER -> ResponderScreen(
+                                onBack = { screen = Screen.HOME }
+                            )
+                            Screen.MESH -> MeshScreen(
                                 onBack = { screen = Screen.HOME }
                             )
                         }
@@ -64,7 +69,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun HomeScreen(onCitizen: () -> Unit, onResponder: () -> Unit) {
+fun HomeScreen(onCitizen: () -> Unit, onResponder: () -> Unit, onMesh: () -> Unit) {
     Column(
         modifier = Modifier.fillMaxSize().padding(24.dp),
         verticalArrangement = Arrangement.Center,
@@ -79,6 +84,10 @@ fun HomeScreen(onCitizen: () -> Unit, onResponder: () -> Unit) {
         Spacer(Modifier.height(16.dp))
         OutlinedButton(onClick = onResponder, modifier = Modifier.fillMaxWidth()) {
             Text("I am a rescuer (Responder)")
+        }
+        Spacer(Modifier.height(16.dp))
+        OutlinedButton(onClick = onMesh, modifier = Modifier.fillMaxWidth()) {
+            Text("Mesh test")
         }
     }
 }

@@ -148,7 +148,7 @@ fun ResponderScreen(onBack: () -> Unit) {
                     }
                     Spacer(Modifier.height(8.dp))
                     if (mapType == "Lite") {
-                        LiteClusterMap(clusters, Modifier.weight(1f))
+                        ClusterMap(clusters, Modifier.weight(1f))
                     } else {
                         ClusterMap(clusters, Modifier.weight(1f))
                     }

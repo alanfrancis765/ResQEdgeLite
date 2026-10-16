@@ -34,22 +34,23 @@ data class GpsState(
 
 private const val MAX_FIX_AGE_S = 120L
 
-private fun hasFineLocation(context: Context) =
-    ContextCompat.checkSelfPermission(
-        context, Manifest.permission.ACCESS_FINE_LOCATION
-    ) == PackageManager.PERMISSION_GRANTED
+private fun hasLocationPermission(context: Context) =
+    ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+    ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
 
 @Composable
 fun rememberGps(): GpsState {
     val context = LocalContext.current
-    var granted by remember { mutableStateOf(hasFineLocation(context)) }
-    var gpsEnabled by remember { mutableStateOf(true) }
+    var granted by remember { mutableStateOf(hasLocationPermission(context)) }
+    var locationProvidersEnabled by remember { mutableStateOf(true) }
     var location by remember { mutableStateOf<Location?>(null) }
     var nowNs by remember { mutableStateOf(SystemClock.elapsedRealtimeNanos()) }
 
     val launcher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) { granted = hasFineLocation(context) }
+    ) { _ ->
+        granted = hasLocationPermission(context)
+    }
 
     // Refresh "now" every few seconds so the age of the fix keeps updating.
     LaunchedEffect(Unit) {
@@ -64,18 +65,42 @@ fun rememberGps(): GpsState {
         val lm = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
         val listener = object : LocationListener {
             override fun onLocationChanged(l: Location) {
-                location = l
-                nowNs = SystemClock.elapsedRealtimeNanos()
+                if (location == null || l.time >= (location?.time ?: 0L)) {
+                    location = l
+                    nowNs = SystemClock.elapsedRealtimeNanos()
+                }
             }
-            override fun onProviderEnabled(provider: String) { gpsEnabled = true }
-            override fun onProviderDisabled(provider: String) { gpsEnabled = false }
+            override fun onProviderEnabled(provider: String) { locationProvidersEnabled = true }
+            override fun onProviderDisabled(provider: String) {
+                locationProvidersEnabled = lm.isProviderEnabled(LocationManager.GPS_PROVIDER) ||
+                        lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+            }
             @Deprecated("Deprecated in Java")
             override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
         }
         try {
-            gpsEnabled = lm.isProviderEnabled(LocationManager.GPS_PROVIDER)
-            lm.getLastKnownLocation(LocationManager.GPS_PROVIDER)?.let { location = it }
-            lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 2000L, 0f, listener)
+            val gpsEnabled = lm.isProviderEnabled(LocationManager.GPS_PROVIDER)
+            val netEnabled = lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+            locationProvidersEnabled = gpsEnabled || netEnabled
+
+            val lastGps = if (gpsEnabled) lm.getLastKnownLocation(LocationManager.GPS_PROVIDER) else null
+            val lastNet = if (netEnabled) lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER) else null
+
+            val bestLast = when {
+                lastGps != null && lastNet != null -> if (lastGps.time > lastNet.time) lastGps else lastNet
+                lastGps != null -> lastGps
+                else -> lastNet
+            }
+            if (bestLast != null) {
+                location = bestLast
+            }
+
+            if (gpsEnabled) {
+                lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 2000L, 0f, listener)
+            }
+            if (netEnabled) {
+                lm.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 2000L, 0f, listener)
+            }
         } catch (e: SecurityException) {
             // permission revoked while running
         }
@@ -89,7 +114,7 @@ fun rememberGps(): GpsState {
 
     val status = when {
         !granted -> GpsStatus.NO_PERMISSION
-        !gpsEnabled -> GpsStatus.GPS_OFF
+        !locationProvidersEnabled -> GpsStatus.GPS_OFF
         loc == null || age > MAX_FIX_AGE_S -> GpsStatus.SEARCHING
         else -> GpsStatus.FIX
     }
