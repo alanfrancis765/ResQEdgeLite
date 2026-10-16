@@ -12,6 +12,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
+import com.resqedge.lite.data.DemoData
 import com.resqedge.lite.data.ServiceLocator
 import com.resqedge.lite.mesh.MeshNode
 import com.resqedge.lite.mesh.rememberMeshPermissionsState
@@ -38,11 +39,20 @@ fun MeshScreen(onBack: () -> Unit) {
     val (permissionsGranted, requestPermissions) = rememberMeshPermissionsState()
 
     val ingestor = remember { ServiceLocator.ingestor(context) }
+    val store = remember { ServiceLocator.store(context) }
     val meshNode = remember { MeshNode(context, ingestor) }
 
     val connectedPeers by meshNode.connectedPeers.collectAsState()
+    val connectingPeers by meshNode.connectingPeers.collectAsState()
     val logLines by meshNode.log.collectAsState()
-    val storedCount by ServiceLocator.store(context).observeCount().collectAsState(initial = 0)
+    val storedCount by store.observeCount().collectAsState(initial = 0)
+
+    val receivedStored by meshNode.receivedStored.collectAsState()
+    val receivedDuplicate by meshNode.receivedDuplicate.collectAsState()
+    val receivedMalformed by meshNode.receivedMalformed.collectAsState()
+    val sentPackets by meshNode.sentPackets.collectAsState()
+    val lastSyncSent by meshNode.lastSyncSent.collectAsState()
+    val connectTimes by meshNode.connectTimes.collectAsState()
 
     var isRunning by remember { mutableStateOf(false) }
 
@@ -72,7 +82,8 @@ fun MeshScreen(onBack: () -> Unit) {
 
         val permStatus = if (permissionsGranted) "Permissions: OK" else "Permissions: Missing"
         val runStatus = if (isRunning) "Mesh: Running" else "Mesh: Stopped"
-        Text("$permStatus | $runStatus", style = MaterialTheme.typography.bodyMedium)
+        val peerStatus = if (connectingPeers.isNotEmpty()) "Peers: connecting..." else "Peers: ${connectedPeers.size}"
+        Text("$permStatus | $runStatus | $peerStatus", style = MaterialTheme.typography.bodyMedium)
 
         Spacer(Modifier.height(8.dp))
 
@@ -81,6 +92,21 @@ fun MeshScreen(onBack: () -> Unit) {
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.error
         )
+
+        Spacer(Modifier.height(8.dp))
+
+        if (connectTimes.isNotEmpty()) {
+            val last = connectTimes.last()
+            val avg = connectTimes.average().toLong()
+            val n = connectTimes.size
+            Text("Connect time: last $last ms, average $avg ms over $n", style = MaterialTheme.typography.bodySmall)
+            Spacer(Modifier.height(4.dp))
+        }
+
+        Text("Stats: Stored=$receivedStored | Dup=$receivedDuplicate | Malf=$receivedMalformed | Sent=$sentPackets", style = MaterialTheme.typography.bodySmall)
+        if (lastSyncSent.isNotEmpty()) {
+            Text("Last sync: $lastSyncSent", style = MaterialTheme.typography.bodySmall)
+        }
 
         Spacer(Modifier.height(8.dp))
 
@@ -129,21 +155,47 @@ fun MeshScreen(onBack: () -> Unit) {
                         accuracyM = 0,
                         senderId = Random.nextInt()
                     )
-                    val bytes = packet.toBytes()
-                    coroutineScope.launch {
-                        ingestor.ingest(bytes)
-                        meshNode.sendToAll(bytes)
-                    }
+                    meshNode.sendTestSos(packet.toBytes())
                 },
                 modifier = Modifier.weight(1.0f)
             ) {
                 Text("Send test SOS")
             }
-            OutlinedButton(
-                onClick = { },
+            Button(
+                onClick = {
+                    meshNode.sendPing()
+                },
                 modifier = Modifier.weight(1.0f)
             ) {
-                Text("Clear log")
+                Text("Ping peers")
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Button(
+                onClick = {
+                    coroutineScope.launch {
+                        DemoData.load(ingestor)
+                    }
+                },
+                modifier = Modifier.weight(1.0f)
+            ) {
+                Text("Load 200 packets")
+            }
+            Button(
+                onClick = {
+                    coroutineScope.launch {
+                        store.clear()
+                    }
+                },
+                modifier = Modifier.weight(1.0f)
+            ) {
+                Text("Clear stored")
             }
         }
 
@@ -157,7 +209,7 @@ fun MeshScreen(onBack: () -> Unit) {
         LazyColumn(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(100.dp)
+                .height(80.dp)
         ) {
             items(connectedPeers) { peer ->
                 Text("- ${peer.name} (${peer.id})", style = MaterialTheme.typography.bodySmall)
