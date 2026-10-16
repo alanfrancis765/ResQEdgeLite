@@ -2,10 +2,10 @@
 
 | # | Model | Android | RAM | Play services | Planned role | Status |
 |---|---|---|---|---|---|---|
-| 1 | realme RMX3312 | 15 | 8 GB | Yes | Dev phone, Citizen, budget reference for Gemma | In hand |
-| 2 | Realme 8s 5G (RMX3381) | 13 | 8 GB | Yes | Mesh Relay / Responder | In hand |
-| 3 | CPH2661 | 16 | 12 GB | Yes (check) | Relay or Responder | In hand, untested |
-| 4 | Google Pixel 10 Pro XL | 17 | 16 GB | Yes | Third node | Starts failing with INTERNAL_ERROR 8, under investigation |
+| 1 | realme RMX3312 | 15 | 8 GB | Yes | Dev phone, Citizen, budget reference for Gemma | Mesh tested, GPS works |
+| 2 | Realme 8s 5G (RMX3381) | 13 | 8 GB | Yes | Mesh relay or responder | Mesh tested with RMX3312 (both directions). GPS not getting a fix, under investigation |
+| 3 | CPH2661 | 16 | 12 GB | Yes | Relay or responder | Mesh tested with RMX3312 (connect and receive worked) |
+| 4 | Google Pixel 10 Pro XL | 17 | 16 GB | Yes | Third node | Start fails with INTERNAL_ERROR 8, pending Prompt 10b |
 
 ## Device Details
 
@@ -14,25 +14,25 @@
 * **OS:** Android 15
 * **RAM:** 8 GB
 * **Planned role:** Dev phone, Citizen, budget reference for Gemma
-* **Status:** In hand
+* **Status:** Mesh tested, GPS works
 
-### Phone 2 (Mesh Relay / Responder)
+### Phone 2 (Mesh relay or responder)
 * **Make & Model:** Realme 8s 5G (RMX3381)
 * **OS:** Android 13
 * **RAM:** 8 GB
-* **Planned role:** Mesh Relay / Responder
-* **Status:** In hand
+* **Planned role:** Mesh relay or responder
+* **Status:** Mesh tested with RMX3312 (both directions). GPS not getting a fix, under investigation
 
-### Phone 3 (Relay or Responder)
+### Phone 3 (Relay or responder)
 * **Make & Model:** CPH2661
 * **OS:** Android 16
 * **RAM:** 12 GB
-* **Planned role:** Relay or Responder
-* **Status:** In hand, untested
+* **Planned role:** Relay or responder
+* **Status:** Mesh tested with RMX3312 (connect and receive worked)
 
 ### Phone 4 (Third node)
 * **Make & Model:** Google Pixel 10 Pro XL
 * **OS:** Android 17
 * **RAM:** 16 GB
 * **Planned role:** Third node
-* **Status:** Starts failing with INTERNAL_ERROR 8, under investigation
+* **Status:** Start fails with INTERNAL_ERROR 8, pending Prompt 10b
