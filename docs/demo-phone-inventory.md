@@ -1,13 +1,7 @@
-# Demo Phone Inventory
+# Demo phone inventory
 
-| Model | Android | RAM | Play Services |
-|---|---|---|---|
-| realme RMX3312 | Android 15 | 8 GB | Yes |
-
-## Demo Readiness
-- Available phones: 1
-- Target phones for three-device relay testing: 3
-- Remaining phones needed: 2
-
-## Notes
-- Confirm device availability before the final relay demonstration.
+| # | Model | Android | RAM | Play services | Planned role | Status |
+|---|---|---|---|---|---|---|
+| 1 | realme RMX3312 | 15 | 8 GB | Yes | Dev phone, Citizen, budget reference for Gemma | In hand |
+| 2 | CPH2661 | 16 | 12 GB | Yes (check) | Relay or Responder | In hand, untested |
+| 3 | Google Pixel 10 Pro XL | 17 | 16 GB | Yes | Third node | Starts failing with INTERNAL_ERROR 8, under investigation |
