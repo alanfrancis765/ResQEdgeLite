@@ -51,7 +51,7 @@ fun CitizenScreen(onBack: () -> Unit) {
     var packet by remember { mutableStateOf<SosPacket?>(null) }
     var locationNote by remember { mutableStateOf("") }
     var useTest by remember { mutableStateOf(false) }
-    val senderId = remember { Random.nextInt(0, Int.MAX_VALUE) } // persist per install later
+    val senderId = remember { Random.nextInt(0, Int.MAX_VALUE) }
     val gps = rememberGps()
 
     val canPrepare = gps.status == GpsStatus.FIX || useTest
@@ -123,10 +123,11 @@ fun CitizenScreen(onBack: () -> Unit) {
                     accuracyM = if (live) Math.round(gps.accuracyM) else 0,
                     senderId = senderId
                 )
-                locationNote = if (live)
-                    "Live GPS, accuracy about ${Math.round(gps.accuracyM)} m"
-                else
-                    "TEST location (not real)"
+                locationNote = when {
+                    !live -> "TEST location (not real)"
+                    gps.ageSeconds > 120L -> "Last known (${Math.max(1, gps.ageSeconds / 60)} min old), accuracy about ${Math.round(gps.accuracyM)} m"
+                    else -> "Live GPS (${gps.source}), accuracy about ${Math.round(gps.accuracyM)} m"
+                }
                 saveMsg = ""
             },
             modifier = Modifier.fillMaxWidth()
@@ -183,30 +184,49 @@ private fun GpsCard(gps: GpsState, useTest: Boolean, onUseTest: (Boolean) -> Uni
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(12.dp)) {
             Text("Location", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(4.dp))
+            Text("Satellites: ${gps.satellitesVisible} visible, ${gps.satellitesUsed} used", style = MaterialTheme.typography.bodySmall)
+            Spacer(Modifier.height(4.dp))
+
             when (gps.status) {
                 GpsStatus.NO_PERMISSION -> {
-                    Text("Precise location permission is needed to attach your position.")
+                    Text(gps.hint)
                     Spacer(Modifier.height(8.dp))
                     Button(onClick = gps.requestPermission) { Text("Allow location") }
                 }
                 GpsStatus.GPS_OFF -> {
-                    Text("Location is switched off on this phone.")
+                    Text(gps.hint)
                     Spacer(Modifier.height(8.dp))
                     OutlinedButton(onClick = {
                         context.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
                     }) { Text("Open location settings") }
                 }
-                GpsStatus.SEARCHING ->
-                    Text("Searching for a GPS signal. Go near a window or outside; this can take a minute.")
-                GpsStatus.FIX ->
-                    Text(
-                        String.format(
-                            Locale.US,
-                            "%.5f, %.5f  (accuracy %d m, updated %d s ago)",
-                            gps.lat, gps.lon, Math.round(gps.accuracyM), gps.ageSeconds
+                GpsStatus.SEARCHING -> {
+                    Text(gps.hint)
+                }
+                GpsStatus.FIX -> {
+                    if (gps.ageSeconds > 120L) {
+                        Text(
+                            String.format(
+                                Locale.US,
+                                "%.5f, %.5f  (Last known (%d min old), accuracy %d m)",
+                                gps.lat, gps.lon, Math.max(1, gps.ageSeconds / 60), Math.round(gps.accuracyM)
+                            )
                         )
-                    )
+                    } else {
+                        Text(
+                            String.format(
+                                Locale.US,
+                                "%.5f, %.5f  (source: %s, accuracy %d m, updated %d s ago)",
+                                gps.lat, gps.lon, gps.source, Math.round(gps.accuracyM), gps.ageSeconds
+                            )
+                        )
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Text(gps.hint, style = MaterialTheme.typography.bodySmall)
+                }
             }
+            Spacer(Modifier.height(8.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Checkbox(checked = useTest, onCheckedChange = onUseTest)
                 Text("Use test location (for indoor testing)")
