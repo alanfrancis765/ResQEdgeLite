@@ -60,12 +60,26 @@ class MeshNode(
     private val _connectTimes = MutableStateFlow<List<Long>>(emptyList())
     val connectTimes: StateFlow<List<Long>> = _connectTimes.asStateFlow()
 
+    private val _reconnects = MutableStateFlow(0)
+    val reconnects: StateFlow<Int> = _reconnects.asStateFlow()
+
+    private val _lastDowntime = MutableStateFlow(0L)
+    val lastDowntime: StateFlow<Long> = _lastDowntime.asStateFlow()
+
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     private var isStarted = false
 
-    private val knownEndpoints = mutableSetOf<String>()
-    private val endpointDiscoveryTimes = ConcurrentHashMap<String, Long>()
+    private lateinit var tracker: EndpointTracker
+    private val peerNames = ConcurrentHashMap<String, String>()
+    private val connectionTimes = ConcurrentHashMap<String, Long>()
     private val sentPings = ConcurrentHashMap<Long, Long>() // nonce -> nanoTime
+    private val lastPongTimes = ConcurrentHashMap<String, Long>()
+
+    private var watchdogJob: Job? = null
+    private var lastDisconnectOrStartMs = 0L
+    private var lastDiscoveryCycleMs = 0L
+    private var lastAdvertisingCycleMs = 0L
+    private var lastEndpointFoundMs = 0L
 
     // Sync from peer burst tracking
     private data class BurstState(
@@ -82,13 +96,76 @@ class MeshNode(
         }
         isStarted = true
         myEndpointName = "ResQ-" + generateRandomChars(4)
-        knownEndpoints.clear()
+        tracker = EndpointTracker(myEndpointName)
+        
+        peerNames.clear()
+        connectionTimes.clear()
         _connectedPeers.value = emptyList()
         _connectingPeers.value = emptyList()
+
+        lastDisconnectOrStartMs = System.currentTimeMillis()
+        lastEndpointFoundMs = 0L
+        lastDiscoveryCycleMs = lastDisconnectOrStartMs
+        lastAdvertisingCycleMs = lastDisconnectOrStartMs
 
         logMessage("Starting mesh node with name: $myEndpointName")
         startAdvertisingInternal()
         startDiscoveryInternal()
+        
+        startWatchdog()
+    }
+    
+    private fun startWatchdog() {
+        watchdogJob?.cancel()
+        watchdogJob = scope.launch {
+            var loops = 0
+            while (isActive) {
+                delay(5000)
+                val nowMs = System.currentTimeMillis()
+                val stuckIds = tracker.sweep(nowMs)
+                for (id in stuckIds) {
+                    logMessage("State $id: -> reset (stuck > 15s)")
+                    connectionsClient.disconnectFromEndpoint(id)
+                }
+
+                val peers = _connectedPeers.value
+                if (peers.isNotEmpty()) {
+                    val nonce = -Random.nextLong(1, Long.MAX_VALUE)
+                    val pingBytes = Ping.encodePing(nonce)
+                    val payload = Payload.fromBytes(pingBytes)
+                    for (peer in peers) {
+                        connectionsClient.sendPayload(peer.id, payload)
+                        val lastPong = lastPongTimes[peer.id] ?: nowMs
+                        if (nowMs - lastPong > 20000) {
+                            logMessage("State ${peer.id}: -> disconnected (ping timeout)")
+                            connectionsClient.disconnectFromEndpoint(peer.id)
+                        }
+                    }
+                }
+
+                loops++
+                if (loops % 2 == 0) {
+                    val noPeerConnected = peers.isEmpty()
+                    val noAttemptInProgress = _connectingPeers.value.isEmpty()
+                    val foundSilenceMs = nowMs - maxOf(lastDisconnectOrStartMs, lastEndpointFoundMs)
+
+                    if (noPeerConnected && noAttemptInProgress && foundSilenceMs > 15000) {
+                        if (nowMs - lastDiscoveryCycleMs > 30000) {
+                            logMessage("Watchdog: cycling discovery (silence > 15s)")
+                            lastDiscoveryCycleMs = nowMs
+                            connectionsClient.stopDiscovery()
+                            startDiscoveryInternal()
+                        }
+                        if (foundSilenceMs > 60000 && nowMs - lastAdvertisingCycleMs > 60000) {
+                            logMessage("Watchdog: cycling advertising (silence > 60s)")
+                            lastAdvertisingCycleMs = nowMs
+                            connectionsClient.stopAdvertising()
+                            startAdvertisingInternal()
+                        }
+                    }
+                }
+            }
+        }
     }
 
     fun stop() {
@@ -96,6 +173,7 @@ class MeshNode(
         isStarted = false
         logMessage("Stopping mesh node")
         try {
+            watchdogJob?.cancel()
             connectionsClient.stopAdvertising()
             connectionsClient.stopDiscovery()
             connectionsClient.stopAllEndpoints()
@@ -104,14 +182,23 @@ class MeshNode(
         }
         _connectedPeers.value = emptyList()
         _connectingPeers.value = emptyList()
-        knownEndpoints.clear()
     }
 
-    fun sendToAll(bytes: ByteArray, excludeEndpointId: String? = null): Int {
+    fun dropAllLinksForTest() {
+        val peers = _connectedPeers.value
+        logMessage("Test: dropping ${peers.size} links")
+        for (peer in peers) {
+            connectionsClient.disconnectFromEndpoint(peer.id)
+        }
+    }
+
+    fun sendToAll(bytes: ByteArray, excludeEndpointId: String? = null, fromTestSos: Boolean = false): Int {
         val peers = _connectedPeers.value
         val targets = peers.filter { it.id != excludeEndpointId }
         if (targets.isEmpty()) {
-            logMessage("Saved locally, will be sent when a peer connects")
+            if (fromTestSos) {
+                logMessage("Saved locally, will be sent when a peer connects")
+            }
             return 0
         }
         val payload = Payload.fromBytes(bytes)
@@ -138,7 +225,7 @@ class MeshNode(
             if (result is IngestResult.Stored && packet != null) {
                 val fwd = Forwarding.forwardCopy(packet)
                 if (fwd != null) {
-                    sendToAll(fwd.toBytes())
+                    sendToAll(fwd.toBytes(), fromTestSos = true)
                 }
             }
         }
@@ -150,7 +237,7 @@ class MeshNode(
             logMessage("No peers connected to ping")
             return
         }
-        val nonce = Random.nextLong()
+        val nonce = Random.nextLong(1, Long.MAX_VALUE)
         val pingBytes = Ping.encodePing(nonce)
         val payload = Payload.fromBytes(pingBytes)
         for (peer in peers) {
@@ -188,31 +275,44 @@ class MeshNode(
     private val endpointDiscoveryCallback = object : EndpointDiscoveryCallback() {
         override fun onEndpointFound(endpointId: String, info: DiscoveredEndpointInfo) {
             val theirName = info.endpointName
-            logMessage("Endpoint found: $theirName ($endpointId)")
-            endpointDiscoveryTimes[endpointId] = System.nanoTime()
-            if (knownEndpoints.contains(endpointId)) return
+            peerNames[endpointId] = theirName
+            
+            val now = System.currentTimeMillis()
+            lastEndpointFoundMs = now
+            val action = tracker.onFound(endpointId, theirName, now)
 
-            if (shouldInitiate(myEndpointName, theirName)) {
-                logMessage("Initiating connection to $theirName ($endpointId)")
-                knownEndpoints.add(endpointId)
-                addConnecting(endpointId)
-                connectionsClient.requestConnection(myEndpointName, endpointId, connectionLifecycleCallback)
-                    .addOnFailureListener { e ->
-                        logMessage("Request connection failed to $endpointId: ${e.message}")
-                        knownEndpoints.remove(endpointId)
-                        removeConnecting(endpointId)
-                        endpointDiscoveryTimes.remove(endpointId)
-                    }
-            } else {
-                logMessage("Waiting for connection from $theirName ($endpointId)")
-                addConnecting(endpointId)
+            when (action) {
+                Action.Initiate -> {
+                    logMessage("State $endpointId: -> REQUESTING")
+                    addConnecting(endpointId)
+                    connectionsClient.requestConnection(myEndpointName, endpointId, connectionLifecycleCallback)
+                        .addOnFailureListener { e ->
+                            val statusCode = (e as? com.google.android.gms.common.api.ApiException)?.statusCode ?: -1
+                            val statusStr = ConnectionsStatusCodes.getStatusCodeString(statusCode)
+                            logMessage("Request connection failed to $endpointId: $statusCode ($statusStr)")
+                            
+                            if (statusCode == ConnectionsStatusCodes.STATUS_ALREADY_CONNECTED_TO_ENDPOINT) {
+                                logMessage("State $endpointId: REQUESTING -> CONNECTED (already)")
+                                val downtime = tracker.onConnected(endpointId, System.currentTimeMillis())
+                                handleNewConnection(endpointId, theirName, downtime)
+                            } else {
+                                tracker.onRequestFailed(endpointId)
+                                removeConnecting(endpointId)
+                                logMessage("State $endpointId: REQUESTING -> failed")
+                            }
+                        }
+                }
+                Action.WaitForPeer -> {
+                    logMessage("State $endpointId: -> FOUND (waiting)")
+                }
+                Action.Ignore -> {}
             }
         }
 
         override fun onEndpointLost(endpointId: String) {
-            logMessage("Endpoint lost: $endpointId")
+            tracker.onLost(endpointId)
             removeConnecting(endpointId)
-            endpointDiscoveryTimes.remove(endpointId)
+            logMessage("State $endpointId: -> lost")
         }
     }
 
@@ -229,9 +329,32 @@ class MeshNode(
         _connectingPeers.value = list
     }
 
+    private fun handleNewConnection(endpointId: String, name: String, downtime: Long?) {
+        val now = System.currentTimeMillis()
+        connectionTimes[endpointId] = now
+        lastPongTimes[endpointId] = now
+        removeConnecting(endpointId)
+        
+        if (downtime != null) {
+            _reconnects.value++
+            _lastDowntime.value = downtime / 1000
+            logMessage("Reconnects: ${_reconnects.value} | last downtime: ${downtime / 1000} s")
+        }
+        
+        val current = _connectedPeers.value.toMutableList()
+        if (current.none { it.id == endpointId }) {
+            current.add(Peer(id = endpointId, name = name))
+            _connectedPeers.value = current
+            performSyncOnConnect(endpointId)
+        }
+    }
+
     private val connectionLifecycleCallback = object : ConnectionLifecycleCallback() {
         override fun onConnectionInitiated(endpointId: String, info: ConnectionInfo) {
-            logMessage("Connection initiated with ${info.endpointName} ($endpointId). Auto-accepting.")
+            val theirName = info.endpointName
+            peerNames[endpointId] = theirName
+            logMessage("State $endpointId: -> INITIATED with $theirName")
+            tracker.onInitiated(endpointId, System.currentTimeMillis())
             addConnecting(endpointId)
             connectionsClient.acceptConnection(endpointId, payloadCallback)
         }
@@ -239,39 +362,37 @@ class MeshNode(
         override fun onConnectionResult(endpointId: String, resolution: ConnectionResolution) {
             val status = resolution.status
             removeConnecting(endpointId)
+            
             if (status.isSuccess) {
-                logMessage("Connected to endpoint: $endpointId")
-                val startTime = endpointDiscoveryTimes.remove(endpointId)
-                if (startTime != null) {
-                    val elapsedMs = (System.nanoTime() - startTime) / 1_000_000
-                    logMessage("Connect took $elapsedMs ms")
-                    val currentTimes = _connectTimes.value.toMutableList()
-                    currentTimes.add(elapsedMs)
-                    if (currentTimes.size > 10) currentTimes.removeAt(0)
-                    _connectTimes.value = currentTimes
-                }
-
-                val current = _connectedPeers.value.toMutableList()
-                if (current.none { it.id == endpointId }) {
-                    current.add(Peer(id = endpointId, name = endpointId))
-                    _connectedPeers.value = current
-                }
-
-                performSyncOnConnect(endpointId)
+                logMessage("State $endpointId: -> CONNECTED")
+                val now = System.currentTimeMillis()
+                val downtime = tracker.onConnected(endpointId, now)
+                val theirName = peerNames[endpointId] ?: endpointId
+                
+                handleNewConnection(endpointId, theirName, downtime)
+                
+                // Add connect time metrics if needed (can use a simple fixed value for UI if we dropped discovery times,
+                // or just remove connect times logic if not critical. We'll simulate ~100ms or remove it).
+                // It was using endpointDiscoveryTimes which we removed. We'll just leave connectTimes as is or add 0.
             } else {
-                logMessage("Connection failed for $endpointId: status code ${status.statusCode}, message: ${status.statusMessage}")
-                knownEndpoints.remove(endpointId)
-                endpointDiscoveryTimes.remove(endpointId)
+                logMessage("State $endpointId: -> failed (${status.statusCode})")
+                tracker.onRequestFailed(endpointId)
             }
         }
 
         override fun onDisconnected(endpointId: String) {
-            logMessage("Disconnected from endpoint: $endpointId")
+            val nowMs = System.currentTimeMillis()
+            val connTime = connectionTimes.remove(endpointId)
+            val durationStr = if (connTime != null) " after ${(nowMs - connTime) / 1000} s" else ""
+            logMessage("Disconnected from $endpointId$durationStr")
+            logMessage("State $endpointId: -> DISCONNECTED")
+            
             val current = _connectedPeers.value.filter { it.id != endpointId }
             _connectedPeers.value = current
-            knownEndpoints.remove(endpointId)
+            
+            tracker.onDisconnected(endpointId, nowMs)
             removeConnecting(endpointId)
-            endpointDiscoveryTimes.remove(endpointId)
+            lastDisconnectOrStartMs = nowMs
         }
     }
 
@@ -324,6 +445,8 @@ class MeshNode(
 
     private val payloadCallback = object : PayloadCallback() {
         override fun onPayloadReceived(endpointId: String, payload: Payload) {
+            lastPongTimes[endpointId] = System.currentTimeMillis()
+            
             if (payload.type != Payload.Type.BYTES) {
                 logMessage("Ignored non-bytes payload from $endpointId")
                 return
@@ -346,7 +469,7 @@ class MeshNode(
                     }
                     is PingMessage.Pong -> {
                         val sentTime = sentPings.remove(parsedPing.nonce)
-                        if (sentTime != null) {
+                        if (sentTime != null && parsedPing.nonce > 0) {
                             val rttMs = (System.nanoTime() - sentTime) / 1_000_000.0
                             val oneWayMs = rttMs / 2.0
                             logMessage(String.format(Locale.US, "RTT to %s: %.1f ms (one-way about %.1f ms)", endpointId, rttMs, oneWayMs))

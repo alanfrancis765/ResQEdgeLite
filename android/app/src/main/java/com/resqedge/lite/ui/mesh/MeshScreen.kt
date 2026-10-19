@@ -53,6 +53,8 @@ fun MeshScreen(onBack: () -> Unit) {
     val sentPackets by meshNode.sentPackets.collectAsState()
     val lastSyncSent by meshNode.lastSyncSent.collectAsState()
     val connectTimes by meshNode.connectTimes.collectAsState()
+    val reconnects by meshNode.reconnects.collectAsState()
+    val lastDowntime by meshNode.lastDowntime.collectAsState()
 
     var isRunning by remember { mutableStateOf(false) }
 
@@ -103,6 +105,7 @@ fun MeshScreen(onBack: () -> Unit) {
             Spacer(Modifier.height(4.dp))
         }
 
+        Text("Reconnects: $reconnects | last downtime: $lastDowntime s", style = MaterialTheme.typography.bodySmall)
         Text("Stats: Stored=$receivedStored | Dup=$receivedDuplicate | Malf=$receivedMalformed | Sent=$sentPackets", style = MaterialTheme.typography.bodySmall)
         if (lastSyncSent.isNotEmpty()) {
             Text("Last sync: $lastSyncSent", style = MaterialTheme.typography.bodySmall)
@@ -168,6 +171,12 @@ fun MeshScreen(onBack: () -> Unit) {
                 modifier = Modifier.weight(1.0f)
             ) {
                 Text("Ping peers")
+            }
+            Button(
+                onClick = { meshNode.dropAllLinksForTest() },
+                modifier = Modifier.weight(1.0f)
+            ) {
+                Text("Drop link (test)")
             }
         }
 
