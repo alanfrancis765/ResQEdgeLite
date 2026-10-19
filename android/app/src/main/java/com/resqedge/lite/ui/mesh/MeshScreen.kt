@@ -19,6 +19,7 @@ import com.resqedge.lite.mesh.rememberMeshPermissionsState
 import com.resqedge.lite.model.PacketBuilder
 import com.resqedge.lite.model.SosPacket
 import kotlinx.coroutines.launch
+import java.util.Locale
 import kotlin.random.Random
 
 @Composable
@@ -53,8 +54,7 @@ fun MeshScreen(onBack: () -> Unit) {
     val sentPackets by meshNode.sentPackets.collectAsState()
     val lastSyncSent by meshNode.lastSyncSent.collectAsState()
     val connectTimes by meshNode.connectTimes.collectAsState()
-    val reconnects by meshNode.reconnects.collectAsState()
-    val lastDowntime by meshNode.lastDowntime.collectAsState()
+    val reconnectTotals by meshNode.reconnectTotals.collectAsState()
 
     var isRunning by remember { mutableStateOf(false) }
 
@@ -105,7 +105,15 @@ fun MeshScreen(onBack: () -> Unit) {
             Spacer(Modifier.height(4.dp))
         }
 
-        Text("Reconnects: $reconnects | last downtime: $lastDowntime s", style = MaterialTheme.typography.bodySmall)
+        val lastT = if (reconnectTotals.isNotEmpty()) String.format(Locale.US, "%.1f", reconnectTotals.last() / 1000.0) else "0"
+        val medianMs = if (reconnectTotals.isNotEmpty()) {
+            val sorted = reconnectTotals.sorted()
+            val mid = sorted.size / 2
+            if (sorted.size % 2 == 0) (sorted[mid - 1] + sorted[mid]) / 2 else sorted[mid]
+        } else 0L
+        val medianM = String.format(Locale.US, "%.1f", medianMs / 1000.0)
+        val n = reconnectTotals.size
+        Text("Reconnect: last $lastT s, median $medianM s over $n", style = MaterialTheme.typography.bodySmall)
         Text("Stats: Stored=$receivedStored | Dup=$receivedDuplicate | Malf=$receivedMalformed | Sent=$sentPackets", style = MaterialTheme.typography.bodySmall)
         if (lastSyncSent.isNotEmpty()) {
             Text("Last sync: $lastSyncSent", style = MaterialTheme.typography.bodySmall)

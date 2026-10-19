@@ -66,6 +66,9 @@ class MeshNode(
     private val _lastDowntime = MutableStateFlow(0L)
     val lastDowntime: StateFlow<Long> = _lastDowntime.asStateFlow()
 
+    private val _reconnectTotals = MutableStateFlow<List<Long>>(emptyList())
+    val reconnectTotals: StateFlow<List<Long>> = _reconnectTotals.asStateFlow()
+
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     private var isStarted = false
 
@@ -74,6 +77,17 @@ class MeshNode(
     private val connectionTimes = ConcurrentHashMap<String, Long>()
     private val sentPings = ConcurrentHashMap<Long, Long>() // nonce -> nanoTime
     private val lastPongTimes = ConcurrentHashMap<String, Long>()
+
+    private var reconnectJob: Job? = null
+    private var lastDisconnectedEndpointId: String? = null
+    private var lastDisconnectedEndpointName: String? = null
+    private var disconnectTimestampMs = 0L
+    private var firstAttemptTimestampMs = 0L
+    private var endpointFoundTimestampMs = 0L
+    private var firstAttemptTypeStr = ""
+    private var reconnectAttemptCount = 0
+
+    private val discoveredEndpoints = ConcurrentHashMap<String, String>()
 
     private var watchdogJob: Job? = null
     private var lastDisconnectOrStartMs = 0L
@@ -174,6 +188,7 @@ class MeshNode(
         logMessage("Stopping mesh node")
         try {
             watchdogJob?.cancel()
+            reconnectJob?.cancel()
             connectionsClient.stopAdvertising()
             connectionsClient.stopDiscovery()
             connectionsClient.stopAllEndpoints()
@@ -276,6 +291,11 @@ class MeshNode(
         override fun onEndpointFound(endpointId: String, info: DiscoveredEndpointInfo) {
             val theirName = info.endpointName
             peerNames[endpointId] = theirName
+            discoveredEndpoints[endpointId] = theirName
+
+            if (endpointId == lastDisconnectedEndpointId && endpointFoundTimestampMs == 0L) {
+                endpointFoundTimestampMs = System.currentTimeMillis()
+            }
             
             val now = System.currentTimeMillis()
             lastEndpointFoundMs = now
@@ -311,6 +331,7 @@ class MeshNode(
 
         override fun onEndpointLost(endpointId: String) {
             tracker.onLost(endpointId)
+            discoveredEndpoints.remove(endpointId)
             removeConnecting(endpointId)
             logMessage("State $endpointId: -> lost")
         }
@@ -329,6 +350,89 @@ class MeshNode(
         _connectingPeers.value = list
     }
 
+    private fun startReconnectLoop() {
+        reconnectJob?.cancel()
+        reconnectJob = scope.launch {
+            while (isActive) {
+                val nowMs = System.currentTimeMillis()
+                val sinceDisconnect = nowMs - disconnectTimestampMs
+                val targetId = lastDisconnectedEndpointId
+                val targetName = lastDisconnectedEndpointName
+                if (targetId == null || targetName == null) {
+                    break
+                }
+
+                if (_connectedPeers.value.any { it.id == targetId }) {
+                    break
+                }
+
+                val stillDiscovered = discoveredEndpoints.containsKey(targetId)
+                val isInitiator = shouldInitiate(myEndpointName, targetName)
+
+                val action = ReconnectPolicy.action(
+                    sinceDisconnectMs = sinceDisconnect,
+                    attempt = reconnectAttemptCount + 1,
+                    knownEndpointId = targetId,
+                    endpointStillDiscovered = stillDiscovered,
+                    iAmInitiator = isInitiator
+                )
+
+                when (action) {
+                    ReconnectAction.RequestKnownEndpoint -> {
+                        reconnectAttemptCount++
+                        if (firstAttemptTimestampMs == 0L) {
+                            firstAttemptTimestampMs = nowMs
+                            firstAttemptTypeStr = "RequestKnownEndpoint"
+                        }
+                        logMessage("Reconnect attempt $reconnectAttemptCount: requesting known endpoint $targetId")
+                        addConnecting(targetId)
+                        connectionsClient.requestConnection(myEndpointName, targetId, connectionLifecycleCallback)
+                            .addOnFailureListener { e ->
+                                val statusCode = (e as? com.google.android.gms.common.api.ApiException)?.statusCode ?: -1
+                                val statusStr = ConnectionsStatusCodes.getStatusCodeString(statusCode)
+                                logMessage("Request connection failed to $targetId: $statusCode ($statusStr)")
+                                if (statusCode == ConnectionsStatusCodes.STATUS_ALREADY_CONNECTED_TO_ENDPOINT) {
+                                    logMessage("State $targetId: REQUESTING -> CONNECTED (already)")
+                                    val downtime = tracker.onConnected(targetId, System.currentTimeMillis())
+                                    handleNewConnection(targetId, targetName, downtime)
+                                } else {
+                                    tracker.onRequestFailed(targetId)
+                                    removeConnecting(targetId)
+                                }
+                            }
+                        delay(ReconnectPolicy.delayBeforeAttemptMs(reconnectAttemptCount))
+                    }
+                    ReconnectAction.CycleDiscovery -> {
+                        reconnectAttemptCount++
+                        if (firstAttemptTimestampMs == 0L) {
+                            firstAttemptTimestampMs = nowMs
+                            firstAttemptTypeStr = "CycleDiscovery"
+                        }
+                        if (ReconnectPolicy.canCycleDiscovery(sinceDisconnect, nowMs - lastDiscoveryCycleMs)) {
+                            logMessage("Reconnect: cycling discovery (attempt $reconnectAttemptCount)")
+                            lastDiscoveryCycleMs = nowMs
+                            connectionsClient.stopDiscovery()
+                            startDiscoveryInternal()
+                        }
+                        delay(1000)
+                    }
+                    ReconnectAction.WaitForPeer -> {
+                        if (ReconnectPolicy.canRestartAdvertising(sinceDisconnect) && nowMs - lastAdvertisingCycleMs > ReconnectPolicy.ADVERTISING_RESTART_THRESHOLD_MS) {
+                            logMessage("Reconnect: cycling advertising (downtime > 60s)")
+                            lastAdvertisingCycleMs = nowMs
+                            connectionsClient.stopAdvertising()
+                            startAdvertisingInternal()
+                        }
+                        delay(500)
+                    }
+                    ReconnectAction.Nothing -> {
+                        delay(100)
+                    }
+                }
+            }
+        }
+    }
+
     private fun handleNewConnection(endpointId: String, name: String, downtime: Long?) {
         val now = System.currentTimeMillis()
         connectionTimes[endpointId] = now
@@ -339,6 +443,27 @@ class MeshNode(
             _reconnects.value++
             _lastDowntime.value = downtime / 1000
             logMessage("Reconnects: ${_reconnects.value} | last downtime: ${downtime / 1000} s")
+        }
+
+        if (disconnectTimestampMs > 0L) {
+            reconnectJob?.cancel()
+            reconnectJob = null
+            val connectedMs = System.currentTimeMillis()
+            val a = if (firstAttemptTimestampMs > 0L) firstAttemptTimestampMs - disconnectTimestampMs else 0L
+            val b = if (endpointFoundTimestampMs > 0L && firstAttemptTimestampMs > 0L) endpointFoundTimestampMs - firstAttemptTimestampMs else 0L
+            val c = if (endpointFoundTimestampMs > 0L) connectedMs - endpointFoundTimestampMs else (if (firstAttemptTimestampMs > 0L) connectedMs - firstAttemptTimestampMs else 0L)
+            val t = connectedMs - disconnectTimestampMs
+            val n = reconnectAttemptCount
+            val x = if (firstAttemptTypeStr.isNotEmpty()) firstAttemptTypeStr else "Unknown"
+
+            logMessage("Reconnect timeline: disconnect -> first attempt $a ms, first attempt -> endpoint found $b ms, found -> connected $c ms, total $t ms, attempts $n, first attempt type $x")
+
+            val totals = _reconnectTotals.value.toMutableList()
+            totals.add(t)
+            if (totals.size > 10) totals.removeAt(0)
+            _reconnectTotals.value = totals
+
+            disconnectTimestampMs = 0L
         }
         
         val current = _connectedPeers.value.toMutableList()
@@ -370,10 +495,6 @@ class MeshNode(
                 val theirName = peerNames[endpointId] ?: endpointId
                 
                 handleNewConnection(endpointId, theirName, downtime)
-                
-                // Add connect time metrics if needed (can use a simple fixed value for UI if we dropped discovery times,
-                // or just remove connect times logic if not critical. We'll simulate ~100ms or remove it).
-                // It was using endpointDiscoveryTimes which we removed. We'll just leave connectTimes as is or add 0.
             } else {
                 logMessage("State $endpointId: -> failed (${status.statusCode})")
                 tracker.onRequestFailed(endpointId)
@@ -393,6 +514,16 @@ class MeshNode(
             tracker.onDisconnected(endpointId, nowMs)
             removeConnecting(endpointId)
             lastDisconnectOrStartMs = nowMs
+
+            lastDisconnectedEndpointId = endpointId
+            lastDisconnectedEndpointName = peerNames[endpointId] ?: endpointId
+            disconnectTimestampMs = nowMs
+            firstAttemptTimestampMs = 0L
+            endpointFoundTimestampMs = 0L
+            firstAttemptTypeStr = ""
+            reconnectAttemptCount = 0
+
+            startReconnectLoop()
         }
     }
 
